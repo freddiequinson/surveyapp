@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="card-title">
+                <i class="fas fa-history text-primary me-2"></i>Recent Submissions
+            </h2>
+            <div class="d-flex align-items-center">
+                <div class="input-group me-2" style="width: 200px;">
+                    <span class="input-group-text">
+                        <i class="fas fa-calendar"></i>
+                    </span>
+                    <input type="date" class="form-control" id="dateFilter" 
+                           onchange="filterByDate(this.value)">
+                </div>
+                <button class="btn btn-outline-primary" onclick="clearDateFilter()">
+                    <i class="fas fa-times me-2"></i>Clear Filter
+                </button>
+            </div>
+        </div>
+        <div id="error-message" class="alert alert-danger d-none">
+            Error loading submission history
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th><i class="fas fa-user me-2"></i>Surveyor</th>
+                        <th><i class="fas fa-clock me-2"></i>Submission Time</th>
+                        <th><i class="fas fa-map-marker-alt me-2"></i>Location</th>
+                        <th><i class="fas fa-comment me-2"></i>Note</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentDate = null;
+
+function getLocationLink(latitude, longitude) {
+    if (latitude && longitude) {
+        const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+        return `<a href="${googleMapsUrl}" target="_blank" class="btn btn-sm btn-primary">
+                    <i class="fas fa-map-marker-alt me-1"></i>View on Map
+                </a>`;
+    }
+    return '<span class="text-muted"><i class="fas fa-times-circle me-1"></i>No location</span>';
+}
+
+function filterByDate(date) {
+    currentDate = date;
+    updateHistory();
+}
+
+function clearDateFilter() {
+    currentDate = null;
+    document.getElementById('dateFilter').value = '';
+    updateHistory();
+}
+
+function updateHistory() {
+    const url = currentDate ? `/get_submissions?date=${currentDate}` : '/get_submissions';
+    
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            const historyBody = document.getElementById('historyBody');
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.classList.add('d-none');
+            historyBody.innerHTML = '';
+            
+            if (data.length === 0) {
+                historyBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="text-center text-muted py-4">
+                            <i class="fas fa-inbox fa-3x mb-3"></i>
+                            <p class="mb-0">No submissions found${currentDate ? ' for this date' : ''}</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            data.forEach(submission => {
+                const row = document.createElement('tr');
+                row.className = 'submission-row';
+                row.innerHTML = `
+                    <td>
+                        <span class="badge bg-primary me-2">
+                            <i class="fas fa-user me-1"></i>
+                        </span>
+                        ${submission.name}
+                    </td>
+                    <td>
+                        <span class="badge bg-info me-2">
+                            <i class="fas fa-clock me-1"></i>
+                        </span>
+                        ${submission.time}
+                    </td>
+                    <td>
+                        ${getLocationLink(submission.latitude, submission.longitude)}
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary me-2">
+                            <i class="fas fa-comment me-1"></i>
+                        </span>
+                        ${submission.note || 'No note provided'}
+                    </td>
+                `;
+                historyBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.classList.remove('d-none');
+        });
+}
+
+// Make updateHistory available globally
+window.updateHistory = updateHistory;
+
+// Set max date to today
+document.getElementById('dateFilter').max = new Date().toISOString().split('T')[0];
+
+// Initial load
+updateHistory();
+
+// Update every 30 seconds
+setInterval(updateHistory, 30000);
+
+// Listen for custom event when new submission is made
+window.addEventListener('surveySubmitted', function() {
+    updateHistory();
+});
+</script>
+{% endblock %}

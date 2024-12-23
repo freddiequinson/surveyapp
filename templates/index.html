@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2 class="card-title mb-0">Survey Progress</h2>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-primary" onclick="switchView('total')">
+                            <i class="fas fa-chart-line me-2"></i>Total
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" onclick="switchView('daily')">
+                            <i class="fas fa-calendar-day me-2"></i>Daily
+                        </button>
+                    </div>
+                </div>
+                <div id="gauge-chart"></div>
+                <div class="mt-4">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="progress-stat">
+                                <i class="fas fa-clipboard-list fa-2x text-primary"></i>
+                                <h3 id="totalSubmissions">0</h3>
+                                <p>Total Submissions</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="progress-stat">
+                                <i class="fas fa-calendar-day fa-2x text-success"></i>
+                                <h3 id="dailyQuota">0</h3>
+                                <p>Daily Quota</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="progress-stat">
+                                <i class="fas fa-percentage fa-2x text-info"></i>
+                                <h3><span id="progressPercentage">0</span>%</h3>
+                                <p>Progress</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card submission-card">
+            <div class="card-body">
+                <h3 class="card-title">Submit Survey</h3>
+                <div id="error-message" class="alert alert-danger d-none">
+                </div>
+                <div id="location-status" class="alert alert-info mb-3">
+                    <i class="fas fa-location-arrow me-2"></i>
+                    Requesting location access...
+                </div>
+                <form id="surveyForm" class="mt-4">
+                    <div class="mb-3">
+                        <label for="name" class="form-label">Your Name</label>
+                        <input type="text" class="form-control" id="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="note" class="form-label">Note (Optional)</label>
+                        <textarea class="form-control" id="note" rows="3" placeholder="Add any additional notes..."></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-lg w-100" id="submitBtn">
+                        <i class="fas fa-paper-plane me-2"></i>Submit Survey
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="success-popup" id="successPopup">
+    <i class="fas fa-check-circle me-2"></i>Survey submitted successfully! 
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script>
+let gauge;
+let currentLocation = null;
+let currentView = 'total';
+
+// Request location permission on page load
+function requestLocationPermission() {
+    const locationStatus = document.getElementById('location-status');
+    
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                currentLocation = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude
+                };
+                locationStatus.className = 'alert alert-success mb-3';
+                locationStatus.innerHTML = '<i class="fas fa-check-circle me-2"></i>Location access granted';
+            },
+            function(error) {
+                console.error('Error getting location:', error);
+                locationStatus.className = 'alert alert-warning mb-3';
+                locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location access denied';
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 0
+            }
+        );
+    } else {
+        locationStatus.className = 'alert alert-warning mb-3';
+        locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location not supported';
+    }
+}
+
+function switchView(viewType) {
+    currentView = viewType;
+    const totalBtn = document.querySelector('button[onclick="switchView(\'total\')"]');
+    const dailyBtn = document.querySelector('button[onclick="switchView(\'daily\')"]');
+    
+    if (viewType === 'daily') {
+        dailyBtn.className = 'btn btn-primary';
+        totalBtn.className = 'btn btn-outline-primary';
+    } else {
+        totalBtn.className = 'btn btn-primary';
+        dailyBtn.className = 'btn btn-outline-primary';
+    }
+    
+    updateStats();
+}
+
+function createGauge(value, target, viewType) {
+    const title = viewType === 'daily' ? "Daily Progress" : "Total Progress";
+    const data = [{
+        domain: { x: [0, 1], y: [0, 1] },
+        value: value,
+        title: { text: title },
+        type: "indicator",
+        mode: "gauge+number",
+        gauge: {
+            axis: { range: [null, target] },
+            bar: { color: "#1abc9c" },
+            bgcolor: "white",
+            borderwidth: 2,
+            bordercolor: "gray",
+            steps: [
+                { range: [0, target * 0.33], color: "#ff6b6b" },
+                { range: [target * 0.33, target * 0.66], color: "#ffd93d" },
+                { range: [target * 0.66, target], color: "#6bcb77" }
+            ],
+            threshold: {
+                line: { color: "red", width: 4 },
+                thickness: 0.75,
+                value: target
+            }
+        }
+    }];
+
+    const layout = {
+        width: 500,
+        height: 300,
+        margin: { t: 25, r: 25, l: 25, b: 25 },
+        paper_bgcolor: "white",
+        font: { color: "darkblue", family: "Arial" }
+    };
+
+    Plotly.newPlot('gauge-chart', data, layout);
+}
+
+function showError(message) {
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.textContent = message;
+    errorDiv.classList.remove('d-none');
+}
+
+function hideError() {
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.classList.add('d-none');
+}
+
+function updateStats() {
+    fetch(`/get_stats?view=${currentView}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            document.getElementById('totalSubmissions').textContent = data.total_submissions;
+            document.getElementById('dailyQuota').textContent = data.daily_quota;
+            document.getElementById('progressPercentage').textContent = data.progress_percentage.toFixed(1);
+            createGauge(data.total_submissions, data.target, data.view_type);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showError('Failed to load statistics. Please refresh the page.');
+        });
+}
+
+document.getElementById('surveyForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    hideError();
+    
+    const submitBtn = document.getElementById('submitBtn');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Submitting...';
+    
+    const formData = {
+        name: document.getElementById('name').value.trim(),
+        time: new Date().toISOString(),
+        note: document.getElementById('note').value.trim(),
+        ...(currentLocation || {})  // Spread the location if available
+    };
+
+    submitSurvey(formData, submitBtn);
+});
+
+function submitSurvey(formData, submitBtn) {
+    fetch('/submit_survey', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.message || 'Failed to submit survey');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.status === 'success') {
+            const popup = document.getElementById('successPopup');
+            popup.style.display = 'block';
+            setTimeout(() => {
+                popup.style.display = 'none';
+            }, 3000);
+            document.getElementById('surveyForm').reset();
+            
+            // Update all components
+            updateStats();
+            
+            // Dispatch event for other pages
+            const event = new Event('surveySubmitted');
+            window.dispatchEvent(event);
+            
+            // Trigger updates on other pages if they exist
+            if (window.updateHistory) {
+                window.updateHistory();
+            }
+        } else {
+            throw new Error(data.message || 'Failed to submit survey');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showError(error.message || 'Failed to submit survey. Please try again.');
+    })
+    .finally(() => {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Submit Survey';
+    });
+}
+
+// Request location permission when page loads
+requestLocationPermission();
+
+// Initial load
+updateStats();
+// Update every 30 seconds
+setInterval(updateStats, 30000);
+</script>
+{% endblock %}
