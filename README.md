@@ -44,4 +44,5 @@ This app is configured for deployment on platforms like Render, Heroku, or Pytho
 
 ## License
 
-MIT License
+
+
