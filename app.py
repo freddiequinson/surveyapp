@@ -3,6 +3,10 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import os
 import logging
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut
+from functools import lru_cache
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -34,6 +38,7 @@ class Submission(db.Model):
     note = db.Column(db.Text, nullable=True)
     latitude = db.Column(db.Float, nullable=True)
     longitude = db.Column(db.Float, nullable=True)
+    location_name = db.Column(db.String(200), nullable=True)
 
 # Create tables
 with app.app_context():
@@ -87,12 +92,18 @@ def submit_survey():
                 logger.error(f"Error parsing time: {str(e)}")
                 return jsonify({'status': 'error', 'message': 'Invalid time format'}), 400
 
+        # Get location name if coordinates are provided
+        location_name = None
+        if data.get('latitude') and data.get('longitude'):
+            location_name = get_location_name(data['latitude'], data['longitude'])
+
         submission = Submission(
             surveyor_name=data['name'],
             submission_time=submission_time,
             note=data.get('note', ''),
             latitude=data.get('latitude'),
-            longitude=data.get('longitude')
+            longitude=data.get('longitude'),
+            location_name=location_name
         )
         
         logger.debug(f"Creating submission: {submission.surveyor_name}, {submission.submission_time}, Location: ({submission.latitude}, {submission.longitude})")
@@ -181,6 +192,72 @@ def get_stats():
     except Exception as e:
         logger.error(f"Error in get_stats: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/get_location_stats')
+def get_location_stats():
+    try:
+        # Get all submissions with coordinates
+        submissions = Submission.query.filter(
+            Submission.latitude.isnot(None),
+            Submission.longitude.isnot(None)
+        ).all()
+
+        # Process locations
+        location_counts = {}
+        for submission in submissions:
+            location = get_location_name(submission.latitude, submission.longitude)
+            if location:
+                if location in location_counts:
+                    location_counts[location]['count'] += 1
+                else:
+                    location_counts[location] = {
+                        'count': 1,
+                        'lat': submission.latitude,
+                        'lng': submission.longitude
+                    }
+
+        # Convert to sorted list
+        locations = [
+            {
+                'name': loc,
+                'count': data['count'],
+                'latitude': data['lat'],
+                'longitude': data['lng']
+            }
+            for loc, data in location_counts.items()
+        ]
+        locations.sort(key=lambda x: x['count'], reverse=True)
+
+        return jsonify(locations)
+    except Exception as e:
+        logger.error(f"Error in get_location_stats: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@lru_cache(maxsize=1000)
+def get_location_name(lat, lon):
+    try:
+        # Add delay to avoid hitting rate limits
+        time.sleep(0.1)
+        
+        geolocator = Nominatim(user_agent="surveyapp")
+        location = geolocator.reverse(f"{lat}, {lon}", language='en')
+        
+        if location and location.raw.get('address'):
+            address = location.raw['address']
+            # Try to get suburb or town name
+            location_name = (
+                address.get('suburb') or 
+                address.get('town') or 
+                address.get('city') or 
+                address.get('village') or
+                address.get('municipality') or
+                'Unknown Location'
+            )
+            return location_name
+    except (GeocoderTimedOut, Exception) as e:
+        logger.error(f"Geocoding error: {str(e)}")
+    
+    return 'Unknown Location'
 
 @app.route('/reset_data', methods=['POST'])
 def reset_data():

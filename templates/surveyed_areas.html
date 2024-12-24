@@ -34,6 +34,29 @@
             </div>
         </div>
     </div>
+    
+    <!-- Locations Table -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h3 class="card-title mb-4">Survey Count by Location</h3>
+                <div class="table-responsive">
+                    <table class="table table-hover" id="locationsTable">
+                        <thead>
+                            <tr>
+                                <th>Location</th>
+                                <th class="text-center">Surveys</th>
+                                <th class="text-end">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Table content will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Location Details Modal -->
@@ -50,17 +73,20 @@
                     <span id="modalSurveyor"></span>
                 </div>
                 <div class="mb-3">
-                    <strong>Date:</strong>
-                    <span id="modalDate"></span>
+                    <strong>Date & Time:</strong>
+                    <span id="modalDateTime"></span>
                 </div>
                 <div class="mb-3">
-                    <strong>Time:</strong>
-                    <span id="modalTime"></span>
+                    <strong>Coordinates:</strong>
+                    <span id="modalCoordinates"></span>
                 </div>
                 <div>
-                    <strong>Note:</strong>
-                    <p id="modalNote" class="mt-2"></p>
+                    <strong>Notes:</strong>
+                    <p id="modalNotes" class="mt-2"></p>
                 </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -75,126 +101,99 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
+<style>
+    @media (max-width: 768px) {
+        .table-responsive {
+            margin: 0 -1rem;
+        }
+        .table th, .table td {
+            padding: 0.75rem;
+            font-size: 0.9rem;
+        }
+        .btn-sm {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
+    }
+    .location-row {
+        cursor: pointer;
+    }
+    .location-row:hover {
+        background-color: rgba(52, 152, 219, 0.1);
+    }
+    .location-highlight {
+        background-color: rgba(52, 152, 219, 0.2);
+    }
+    .popup-content {
+        padding: 10px;
+        max-width: 250px;
+    }
+    .popup-content .surveyor-name {
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .popup-content .survey-time {
+        color: #666;
+        font-size: 0.9em;
+        margin-bottom: 8px;
+    }
+    .popup-content .view-details {
+        display: inline-block;
+        margin-top: 5px;
+        color: #007bff;
+        text-decoration: none;
+    }
+    .popup-content .view-details:hover {
+        text-decoration: underline;
+    }
+</style>
+
 <script>
 let map;
 let markers;
 let heatLayer;
 let locationModal;
 let allLocations = [];
+let locationStats = [];
 
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize the modal
     locationModal = new bootstrap.Modal(document.getElementById('locationModal'));
     
     // Initialize the map
-    map = L.map('map', {
-        tap: true, // Enable tap for mobile
-        tapTolerance: 15 // Make tap detection more forgiving
-    }).setView([0, 0], 2);
-    
+    map = L.map('map').setView([-33.8688, 151.2093], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: 'OpenStreetMap contributors'
+        maxZoom: 19,
+        attribution: ' OpenStreetMap contributors'
     }).addTo(map);
 
-    // Initialize marker cluster group with custom options
+    // Initialize marker cluster group
     markers = L.markerClusterGroup({
-        maxClusterRadius: 30,
+        chunkedLoading: true,
         spiderfyOnMaxZoom: true,
         showCoverageOnHover: false,
-        zoomToBoundsOnClick: true,
-        // Custom icon creation for clusters
-        iconCreateFunction: function(cluster) {
-            const count = cluster.getChildCount();
-            return L.divIcon({
-                html: `<div class="cluster-icon">${count}</div>`,
-                className: 'custom-cluster-icon',
-                iconSize: L.point(40, 40)
-            });
-        }
+        zoomToBoundsOnClick: true
     });
-
-    // Add custom CSS for cluster icons
-    const style = document.createElement('style');
-    style.textContent = `
-        .custom-cluster-icon {
-            background: #2c3e50;
-            border-radius: 50%;
-            color: white;
-            text-align: center;
-            line-height: 40px;
-            font-weight: bold;
-            border: 2px solid white;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        }
-        .leaflet-popup-content {
-            margin: 10px;
-            font-size: 14px;
-        }
-        .leaflet-popup-content-wrapper {
-            border-radius: 8px;
-        }
-        .popup-content {
-            padding: 5px;
-        }
-        .popup-content .surveyor-name {
-            font-weight: bold;
-            color: #2c3e50;
-            font-size: 16px;
-            margin-bottom: 5px;
-        }
-        .popup-content .survey-time {
-            color: #666;
-            font-size: 13px;
-        }
-        .popup-content .view-details {
-            display: inline-block;
-            margin-top: 8px;
-            padding: 5px 10px;
-            background: #3498db;
-            color: white;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 13px;
-        }
-        .popup-content .view-details:hover {
-            background: #2980b9;
-        }
-        @media (max-width: 768px) {
-            .leaflet-popup-content {
-                margin: 8px;
-                font-size: 13px;
-                min-width: 150px;
-            }
-            .popup-content .surveyor-name {
-                font-size: 14px;
-            }
-            .popup-content .survey-time {
-                font-size: 12px;
-            }
-            .popup-content .view-details {
-                width: 100%;
-                text-align: center;
-                margin-top: 5px;
-            }
-        }
-    `;
-    document.head.appendChild(style);
-
-    // Add markers to map
     map.addLayer(markers);
 
-    // Load locations
-    loadLocations();
-
-    // Setup heatmap toggle
+    // Handle heatmap toggle
     document.getElementById('heatmapToggle').addEventListener('change', function(e) {
-        toggleHeatmap(e.target.checked);
+        if (e.target.checked) {
+            if (heatLayer) {
+                map.addLayer(heatLayer);
+            }
+        } else {
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+            }
+        }
     });
 
-    // Handle window resize
-    window.addEventListener('resize', function() {
-        map.invalidateSize();
-    });
+    // Load initial data
+    loadLocations();
+    
+    // Set up periodic refresh (every 30 seconds)
+    setInterval(loadLocations, 30000);
 });
 
 function loadLocations() {
@@ -204,100 +203,147 @@ function loadLocations() {
             allLocations = data.filter(loc => loc.latitude && loc.longitude);
             document.getElementById('locationCount').textContent = allLocations.length;
             
-            // Clear existing markers
-            markers.clearLayers();
+            // Update markers
+            updateMarkers();
             
-            // Add markers for each location
-            allLocations.forEach(loc => {
-                const dateTime = new Date(loc.time);
-                const popupContent = `
-                    <div class="popup-content">
-                        <div class="surveyor-name">
-                            <i class="fas fa-user me-1"></i> ${loc.name}
-                        </div>
-                        <div class="survey-time">
-                            <i class="far fa-clock me-1"></i> ${dateTime.toLocaleDateString()} ${dateTime.toLocaleTimeString()}
-                        </div>
-                        <a href="#" class="view-details" onclick="showLocationDetails(${JSON.stringify(loc).replace(/"/g, '&quot;')}); return false;">
-                            <i class="fas fa-info-circle me-1"></i> View Details
-                        </a>
-                    </div>
-                `;
-                
-                const marker = L.marker([loc.latitude, loc.longitude])
-                    .bindPopup(popupContent, {
-                        maxWidth: 300,
-                        autoPan: true,
-                        autoPanPadding: [50, 50]
-                    });
-                
-                markers.addLayer(marker);
-            });
-
-            // Initialize heatmap data
-            if (heatLayer) {
-                map.removeLayer(heatLayer);
-            }
-            heatLayer = L.heatLayer(allLocations.map(loc => [loc.latitude, loc.longitude, 1]), {
-                radius: 25,
-                blur: 15,
-                maxZoom: 15
-            });
-
-            // Fit map to show all markers
-            if (allLocations.length > 0) {
-                fitAllMarkers();
-            }
+            // Update locations table
+            updateLocationsTable();
+            
+            // Fetch location stats
+            return fetch('/get_location_stats');
         })
-        .catch(error => console.error('Error loading locations:', error));
+        .then(response => response.json())
+        .then(stats => {
+            locationStats = stats;
+            updateLocationsTable();
+        })
+        .catch(error => console.error('Error loading data:', error));
+}
+
+function updateMarkers() {
+    // Clear existing markers
+    markers.clearLayers();
+    
+    // Add markers for each location
+    allLocations.forEach(loc => {
+        const dateTime = new Date(loc.time);
+        const popupContent = `
+            <div class="popup-content">
+                <div class="surveyor-name">
+                    <i class="fas fa-user me-1"></i> ${loc.name}
+                </div>
+                <div class="survey-time">
+                    <i class="far fa-clock me-1"></i> ${dateTime.toLocaleDateString()} ${dateTime.toLocaleTimeString()}
+                </div>
+                <a href="#" class="view-details" onclick="showLocationDetails(${JSON.stringify(loc).replace(/"/g, '&quot;')}); return false;">
+                    <i class="fas fa-info-circle me-1"></i> View Details
+                </a>
+            </div>
+        `;
+        
+        const marker = L.marker([loc.latitude, loc.longitude])
+            .bindPopup(popupContent, {
+                maxWidth: 300,
+                autoPan: true,
+                autoPanPadding: [50, 50]
+            });
+        
+        markers.addLayer(marker);
+    });
+
+    // Initialize heatmap data
+    if (heatLayer) {
+        map.removeLayer(heatLayer);
+    }
+    heatLayer = L.heatLayer(allLocations.map(loc => [loc.latitude, loc.longitude, 1]), {
+        radius: 25,
+        blur: 15,
+        maxZoom: 15
+    });
+
+    // Add heatmap if toggle is checked
+    if (document.getElementById('heatmapToggle').checked && heatLayer) {
+        map.addLayer(heatLayer);
+    }
+}
+
+function updateLocationsTable() {
+    const tbody = document.querySelector('#locationsTable tbody');
+    tbody.innerHTML = '';
+    
+    locationStats.forEach(location => {
+        const row = document.createElement('tr');
+        row.className = 'location-row';
+        row.innerHTML = `
+            <td>
+                <i class="fas fa-map-marker-alt text-danger me-2"></i>
+                ${location.name}
+            </td>
+            <td class="text-center">
+                <span class="badge bg-primary">${location.count}</span>
+            </td>
+            <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary" onclick="focusLocation(${location.latitude}, ${location.longitude})">
+                    <i class="fas fa-map-marked-alt me-1"></i>
+                    View on Map
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function focusLocation(lat, lng) {
+    map.setView([lat, lng], 15);
+    // Remove previous highlights
+    document.querySelectorAll('.location-highlight').forEach(el => {
+        el.classList.remove('location-highlight');
+    });
+    // Highlight the corresponding row
+    const rows = document.querySelectorAll('.location-row');
+    rows.forEach(row => {
+        if (row.querySelector('button').getAttribute('onclick').includes(lat)) {
+            row.classList.add('location-highlight');
+        }
+    });
 }
 
 function showLocationDetails(location) {
     const dateTime = new Date(location.time);
+    
     document.getElementById('modalSurveyor').textContent = location.name;
-    document.getElementById('modalDate').textContent = dateTime.toLocaleDateString();
-    document.getElementById('modalTime').textContent = dateTime.toLocaleTimeString();
-    document.getElementById('modalNote').textContent = location.note || 'No note provided';
+    document.getElementById('modalDateTime').textContent = `${dateTime.toLocaleDateString()} ${dateTime.toLocaleTimeString()}`;
+    document.getElementById('modalCoordinates').textContent = `${location.latitude}, ${location.longitude}`;
+    document.getElementById('modalNotes').textContent = location.note || 'No notes provided';
+    
     locationModal.show();
+}
+
+function getCurrentLocation() {
+    if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(function(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            map.setView([lat, lng], 15);
+        }, function(error) {
+            console.error("Error getting location:", error);
+            alert("Unable to get your location. Please check your location permissions.");
+        });
+    } else {
+        alert("Geolocation is not supported by your browser.");
+    }
 }
 
 function fitAllMarkers() {
     if (allLocations.length > 0) {
-        const bounds = L.latLngBounds(allLocations.map(loc => [loc.latitude, loc.longitude]));
-        map.fitBounds(bounds, { padding: [50, 50] });
+        const group = L.featureGroup(markers.getLayers());
+        map.fitBounds(group.getBounds().pad(0.1));
     }
 }
 
-function getCurrentLocation() {
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            function(position) {
-                const lat = position.coords.latitude;
-                const lng = position.coords.longitude;
-                map.setView([lat, lng], 15);
-            },
-            function(error) {
-                console.error('Error getting location:', error);
-                alert('Unable to get your current location. Please check your location settings.');
-            }
-        );
-    } else {
-        alert('Geolocation is not supported by your browser.');
-    }
-}
-
-function toggleHeatmap(show) {
-    if (show) {
-        map.addLayer(heatLayer);
-    } else {
-        map.removeLayer(heatLayer);
-    }
-}
-
-// Refresh map when tab becomes visible
-document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'visible') {
-        loadLocations();
+// Handle window resize
+window.addEventListener('resize', function() {
+    if (map) {
         map.invalidateSize();
     }
 });
