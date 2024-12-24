@@ -1,24 +1,29 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-8">
+<div class="row g-3">
+    <div class="col-lg-8">
         <div class="card mb-4">
-            <div class="card-body text-center">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2 class="card-title mb-0">Survey Progress</h2>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-primary" onclick="switchView('total')">
-                            <i class="fas fa-chart-line me-2"></i>Total
-                        </button>
-                        <button type="button" class="btn btn-outline-primary" onclick="switchView('daily')">
-                            <i class="fas fa-calendar-day me-2"></i>Daily
+            <div class="card-body">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4">
+                    <h2 class="card-title mb-3 mb-md-0">Survey Progress</h2>
+                    <div class="d-flex gap-2">
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-primary" onclick="switchView('total')">
+                                <i class="fas fa-chart-line me-2"></i>Total
+                            </button>
+                            <button type="button" class="btn btn-outline-primary" onclick="switchView('daily')">
+                                <i class="fas fa-calendar-day me-2"></i>Daily
+                            </button>
+                        </div>
+                        <button type="button" class="btn btn-danger" onclick="showResetDialog()">
+                            <i class="fas fa-trash-alt me-2"></i>Reset
                         </button>
                     </div>
                 </div>
-                <div id="gauge-chart"></div>
+                <div id="gauge-chart" style="width: 100%; height: 300px;"></div>
                 <div class="mt-4">
-                    <div class="row">
+                    <div class="row g-2">
                         <div class="col-md-4">
                             <div class="progress-stat">
                                 <i class="fas fa-clipboard-list fa-2x text-primary"></i>
@@ -45,7 +50,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-lg-4">
         <div class="card submission-card">
             <div class="card-body">
                 <h3 class="card-title">Submit Survey</h3>
@@ -76,6 +81,37 @@
 <div class="success-popup" id="successPopup">
     <i class="fas fa-check-circle me-2"></i>Survey submitted successfully! 
 </div>
+
+<!-- Reset Modal -->
+<div class="modal fade" id="resetModal" tabindex="-1" aria-labelledby="resetModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resetModalLabel">Reset All Data</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <strong>Warning:</strong> This action will delete all survey submissions and cannot be undone.
+                </div>
+                <div class="mb-3">
+                    <label for="resetPassword" class="form-label">Enter the safe word to continue:</label>
+                    <input type="password" class="form-control" id="resetPassword" placeholder="Enter safe word">
+                </div>
+                <div id="resetError" class="alert alert-danger d-none">
+                    Invalid safe word. Please try again.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="resetData()">
+                    <i class="fas fa-trash-alt me-2"></i>Reset All Data
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -84,6 +120,56 @@
 let gauge;
 let currentLocation = null;
 let currentView = 'total';
+let resetModal;
+let locationRequestInterval;
+
+// Initialize Bootstrap modal
+document.addEventListener('DOMContentLoaded', function() {
+    resetModal = new bootstrap.Modal(document.getElementById('resetModal'));
+});
+
+function showResetDialog() {
+    // Clear previous input and error
+    document.getElementById('resetPassword').value = '';
+    document.getElementById('resetError').classList.add('d-none');
+    resetModal.show();
+}
+
+function resetData() {
+    const password = document.getElementById('resetPassword').value;
+    const errorDiv = document.getElementById('resetError');
+    
+    fetch('/reset_data', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: password })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            resetModal.hide();
+            // Show success message
+            const successPopup = document.getElementById('successPopup');
+            successPopup.innerHTML = '<i class="fas fa-check-circle me-2"></i>All data has been reset successfully!';
+            successPopup.style.display = 'block';
+            setTimeout(() => {
+                successPopup.style.display = 'none';
+            }, 3000);
+            // Refresh stats
+            updateStats();
+        } else {
+            errorDiv.textContent = data.message;
+            errorDiv.classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        errorDiv.textContent = 'An error occurred. Please try again.';
+        errorDiv.classList.remove('d-none');
+    });
+}
 
 // Request location permission on page load
 function requestLocationPermission() {
@@ -98,11 +184,49 @@ function requestLocationPermission() {
                 };
                 locationStatus.className = 'alert alert-success mb-3';
                 locationStatus.innerHTML = '<i class="fas fa-check-circle me-2"></i>Location access granted';
+                
+                // Clear the interval if location is granted
+                if (locationRequestInterval) {
+                    clearInterval(locationRequestInterval);
+                    locationRequestInterval = null;
+                }
             },
             function(error) {
                 console.error('Error getting location:', error);
                 locationStatus.className = 'alert alert-warning mb-3';
-                locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location access denied';
+                
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        locationStatus.innerHTML = `
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span>Location access denied. This app requires location access.</span>
+                                <button class="btn btn-warning btn-sm ms-2" onclick="requestLocationPermission()">
+                                    <i class="fas fa-location-arrow me-1"></i>Grant Access
+                                </button>
+                            </div>`;
+                        
+                        // Set up interval to keep requesting if denied
+                        if (!locationRequestInterval) {
+                            locationRequestInterval = setInterval(function() {
+                                if (!currentLocation) {
+                                    locationStatus.classList.add('animate__animated', 'animate__headShake');
+                                    setTimeout(() => {
+                                        locationStatus.classList.remove('animate__animated', 'animate__headShake');
+                                    }, 1000);
+                                }
+                            }, 10000); // Shake the warning every 10 seconds
+                        }
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location information unavailable';
+                        break;
+                    case error.TIMEOUT:
+                        locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location request timed out';
+                        break;
+                    default:
+                        locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>An unknown error occurred';
+                }
             },
             {
                 enableHighAccuracy: true,
@@ -115,6 +239,13 @@ function requestLocationPermission() {
         locationStatus.innerHTML = '<i class="fas fa-exclamation-triangle me-2"></i>Location not supported';
     }
 }
+
+// Add event listener for page visibility
+document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && !currentLocation) {
+        requestLocationPermission();
+    }
+});
 
 function switchView(viewType) {
     currentView = viewType;
@@ -134,14 +265,26 @@ function switchView(viewType) {
 
 function createGauge(value, target, viewType) {
     const title = viewType === 'daily' ? "Daily Progress" : "Total Progress";
+    const isMobile = window.innerWidth < 768;
+    
     const data = [{
         domain: { x: [0, 1], y: [0, 1] },
         value: value,
-        title: { text: title },
+        title: { 
+            text: title,
+            font: { size: isMobile ? 16 : 20 }
+        },
         type: "indicator",
         mode: "gauge+number",
+        number: { 
+            font: { size: isMobile ? 24 : 30 }
+        },
         gauge: {
-            axis: { range: [null, target] },
+            axis: { 
+                range: [null, target],
+                tickwidth: 1,
+                tickfont: { size: isMobile ? 10 : 12 }
+            },
             bar: { color: "#1abc9c" },
             bgcolor: "white",
             borderwidth: 2,
@@ -160,14 +303,18 @@ function createGauge(value, target, viewType) {
     }];
 
     const layout = {
-        width: 500,
-        height: 300,
-        margin: { t: 25, r: 25, l: 25, b: 25 },
+        autosize: true,
+        margin: { t: isMobile ? 40 : 50, r: 25, l: 25, b: 25 },
         paper_bgcolor: "white",
         font: { color: "darkblue", family: "Arial" }
     };
 
-    Plotly.newPlot('gauge-chart', data, layout);
+    const config = {
+        responsive: true,
+        displayModeBar: false
+    };
+
+    Plotly.newPlot('gauge-chart', data, layout, config);
 }
 
 function showError(message) {
@@ -200,6 +347,13 @@ function updateStats() {
             showError('Failed to load statistics. Please refresh the page.');
         });
 }
+
+// Add resize handler for responsive gauge
+window.addEventListener('resize', () => {
+    if (currentView) {
+        updateStats();
+    }
+});
 
 document.getElementById('surveyForm').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -269,7 +423,7 @@ function submitSurvey(formData, submitBtn) {
     });
 }
 
-// Request location permission when page loads
+// Request location immediately on page load
 requestLocationPermission();
 
 // Initial load

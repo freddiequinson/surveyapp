@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1>Surveyed Areas</h1>
+    <div id="map" style="height: 500px; width: 100%; border-radius: 8px; margin-bottom: 20px;"></div>
+    <div id="loading-overlay" class="alert alert-info">
+        <i class="fas fa-spinner fa-spin"></i> Loading map...
+    </div>
+    <div id="map-error" style="display: none;" class="alert alert-danger">
+        <i class="fas fa-exclamation-triangle"></i> 
+        <span id="error-message"></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Global variables
+let map;
+let markers = [];
+let bounds;
+
+// Initialize map
+function initMap() {
+    console.log('Initializing map...');
+    
+    try {
+        // Create the map
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: { lat: 0, lng: 0 },
+            zoom: 2,
+            mapTypeControl: true,
+            streetViewControl: false,
+            fullscreenControl: true,
+            styles: [
+                {
+                    featureType: "poi",
+                    elementType: "labels",
+                    stylers: [{ visibility: "off" }]
+                }
+            ]
+        });
+
+        // Hide loading overlay once map is ready
+        google.maps.event.addListenerOnce(map, 'tilesloaded', function() {
+            document.getElementById('loading-overlay').style.display = 'none';
+            loadMarkers();
+        });
+
+        console.log('Map initialized successfully');
+    } catch (error) {
+        console.error('Map initialization error:', error);
+        showError('Failed to initialize map: ' + error.message);
+    }
+}
+
+// Load markers from server
+function loadMarkers() {
+    fetch('/get_survey_locations')
+        .then(response => response.json())
+        .then(locations => {
+            console.log('Loading markers for locations:', locations);
+            
+            // Clear existing markers
+            markers.forEach(marker => marker.setMap(null));
+            markers = [];
+            bounds = new google.maps.LatLngBounds();
+
+            // Add new markers
+            locations.forEach(location => {
+                const marker = new google.maps.Marker({
+                    position: { lat: location.lat, lng: location.lng },
+                    map: map,
+                    title: location.name,
+                    animation: google.maps.Animation.DROP
+                });
+
+                bounds.extend(marker.getPosition());
+
+                // Add click listener
+                marker.addListener('click', () => {
+                    const infoWindow = new google.maps.InfoWindow({
+                        content: `
+                            <div style="padding: 10px;">
+                                <h6 style="margin-bottom: 8px;">${location.name}</h6>
+                                <p style="margin-bottom: 5px;"><small>${location.time}</small></p>
+                                ${location.note ? `<p style="margin: 0;"><small>${location.note}</small></p>` : ''}
+                            </div>
+                        `
+                    });
+                    infoWindow.open(map, marker);
+                });
+
+                markers.push(marker);
+            });
+
+            // Fit map to markers
+            if (markers.length > 0) {
+                map.fitBounds(bounds);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading locations:', error);
+            showError('Failed to load survey locations');
+        });
+}
+
+// Show error message
+function showError(message) {
+    document.getElementById('loading-overlay').style.display = 'none';
+    document.getElementById('error-message').textContent = message;
+    document.getElementById('map-error').style.display = 'block';
+}
+
+// Handle authentication failure
+function gm_authFailure() {
+    showError('Google Maps authentication failed. Please check API key configuration.');
+}
+
+// Load the Google Maps JavaScript API
+window.initMap = initMap;
+window.gm_authFailure = gm_authFailure;
+</script>
+<script async defer
+    src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap">
+</script>
+{% endblock %}
