@@ -1,128 +1,305 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container mt-4">
-    <h1>Surveyed Areas</h1>
-    <div id="map" style="height: 500px; width: 100%; border-radius: 8px; margin-bottom: 20px;"></div>
-    <div id="loading-overlay" class="alert alert-info">
-        <i class="fas fa-spinner fa-spin"></i> Loading map...
+<div class="row g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-center mb-4">
+                    <h2 class="card-title mb-3 mb-md-0">Surveyed Areas</h2>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-primary" onclick="fitAllMarkers()">
+                            <i class="fas fa-expand-arrows-alt me-2"></i>View All
+                        </button>
+                        <button type="button" class="btn btn-success" onclick="getCurrentLocation()">
+                            <i class="fas fa-crosshairs me-2"></i>Current Location
+                        </button>
+                    </div>
+                </div>
+                <div id="map-container">
+                    <div id="map" style="height: 70vh; width: 100%; border-radius: 10px;"></div>
+                </div>
+                <div class="mt-4">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap">
+                        <div class="text-muted">
+                            <i class="fas fa-map-marker-alt text-danger"></i> 
+                            Total Locations: <span id="locationCount">0</span>
+                        </div>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="heatmapToggle">
+                            <label class="form-check-label" for="heatmapToggle">Show Heatmap</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div id="map-error" style="display: none;" class="alert alert-danger">
-        <i class="fas fa-exclamation-triangle"></i> 
-        <span id="error-message"></span>
+</div>
+
+<!-- Location Details Modal -->
+<div class="modal fade" id="locationModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Location Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <strong>Surveyor:</strong>
+                    <span id="modalSurveyor"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Date:</strong>
+                    <span id="modalDate"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Time:</strong>
+                    <span id="modalTime"></span>
+                </div>
+                <div>
+                    <strong>Note:</strong>
+                    <p id="modalNote" class="mt-2"></p>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.4.1/dist/MarkerCluster.Default.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.4.1/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
 <script>
-// Global variables
 let map;
-let markers = [];
-let bounds;
+let markers;
+let heatLayer;
+let locationModal;
+let allLocations = [];
 
-// Initialize map
-function initMap() {
-    console.log('Initializing map...');
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize the modal
+    locationModal = new bootstrap.Modal(document.getElementById('locationModal'));
     
-    try {
-        // Create the map
-        map = new google.maps.Map(document.getElementById('map'), {
-            center: { lat: 0, lng: 0 },
-            zoom: 2,
-            mapTypeControl: true,
-            streetViewControl: false,
-            fullscreenControl: true,
-            styles: [
-                {
-                    featureType: "poi",
-                    elementType: "labels",
-                    stylers: [{ visibility: "off" }]
-                }
-            ]
-        });
+    // Initialize the map
+    map = L.map('map', {
+        tap: true, // Enable tap for mobile
+        tapTolerance: 15 // Make tap detection more forgiving
+    }).setView([0, 0], 2);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: 'OpenStreetMap contributors'
+    }).addTo(map);
 
-        // Hide loading overlay once map is ready
-        google.maps.event.addListenerOnce(map, 'tilesloaded', function() {
-            document.getElementById('loading-overlay').style.display = 'none';
-            loadMarkers();
-        });
+    // Initialize marker cluster group with custom options
+    markers = L.markerClusterGroup({
+        maxClusterRadius: 30,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        // Custom icon creation for clusters
+        iconCreateFunction: function(cluster) {
+            const count = cluster.getChildCount();
+            return L.divIcon({
+                html: `<div class="cluster-icon">${count}</div>`,
+                className: 'custom-cluster-icon',
+                iconSize: L.point(40, 40)
+            });
+        }
+    });
 
-        console.log('Map initialized successfully');
-    } catch (error) {
-        console.error('Map initialization error:', error);
-        showError('Failed to initialize map: ' + error.message);
+    // Add custom CSS for cluster icons
+    const style = document.createElement('style');
+    style.textContent = `
+        .custom-cluster-icon {
+            background: #2c3e50;
+            border-radius: 50%;
+            color: white;
+            text-align: center;
+            line-height: 40px;
+            font-weight: bold;
+            border: 2px solid white;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+        .leaflet-popup-content {
+            margin: 10px;
+            font-size: 14px;
+        }
+        .leaflet-popup-content-wrapper {
+            border-radius: 8px;
+        }
+        .popup-content {
+            padding: 5px;
+        }
+        .popup-content .surveyor-name {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+        .popup-content .survey-time {
+            color: #666;
+            font-size: 13px;
+        }
+        .popup-content .view-details {
+            display: inline-block;
+            margin-top: 8px;
+            padding: 5px 10px;
+            background: #3498db;
+            color: white;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 13px;
+        }
+        .popup-content .view-details:hover {
+            background: #2980b9;
+        }
+        @media (max-width: 768px) {
+            .leaflet-popup-content {
+                margin: 8px;
+                font-size: 13px;
+                min-width: 150px;
+            }
+            .popup-content .surveyor-name {
+                font-size: 14px;
+            }
+            .popup-content .survey-time {
+                font-size: 12px;
+            }
+            .popup-content .view-details {
+                width: 100%;
+                text-align: center;
+                margin-top: 5px;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+
+    // Add markers to map
+    map.addLayer(markers);
+
+    // Load locations
+    loadLocations();
+
+    // Setup heatmap toggle
+    document.getElementById('heatmapToggle').addEventListener('change', function(e) {
+        toggleHeatmap(e.target.checked);
+    });
+
+    // Handle window resize
+    window.addEventListener('resize', function() {
+        map.invalidateSize();
+    });
+});
+
+function loadLocations() {
+    fetch('/get_submissions')
+        .then(response => response.json())
+        .then(data => {
+            allLocations = data.filter(loc => loc.latitude && loc.longitude);
+            document.getElementById('locationCount').textContent = allLocations.length;
+            
+            // Clear existing markers
+            markers.clearLayers();
+            
+            // Add markers for each location
+            allLocations.forEach(loc => {
+                const dateTime = new Date(loc.time);
+                const popupContent = `
+                    <div class="popup-content">
+                        <div class="surveyor-name">
+                            <i class="fas fa-user me-1"></i> ${loc.name}
+                        </div>
+                        <div class="survey-time">
+                            <i class="far fa-clock me-1"></i> ${dateTime.toLocaleDateString()} ${dateTime.toLocaleTimeString()}
+                        </div>
+                        <a href="#" class="view-details" onclick="showLocationDetails(${JSON.stringify(loc).replace(/"/g, '&quot;')}); return false;">
+                            <i class="fas fa-info-circle me-1"></i> View Details
+                        </a>
+                    </div>
+                `;
+                
+                const marker = L.marker([loc.latitude, loc.longitude])
+                    .bindPopup(popupContent, {
+                        maxWidth: 300,
+                        autoPan: true,
+                        autoPanPadding: [50, 50]
+                    });
+                
+                markers.addLayer(marker);
+            });
+
+            // Initialize heatmap data
+            if (heatLayer) {
+                map.removeLayer(heatLayer);
+            }
+            heatLayer = L.heatLayer(allLocations.map(loc => [loc.latitude, loc.longitude, 1]), {
+                radius: 25,
+                blur: 15,
+                maxZoom: 15
+            });
+
+            // Fit map to show all markers
+            if (allLocations.length > 0) {
+                fitAllMarkers();
+            }
+        })
+        .catch(error => console.error('Error loading locations:', error));
+}
+
+function showLocationDetails(location) {
+    const dateTime = new Date(location.time);
+    document.getElementById('modalSurveyor').textContent = location.name;
+    document.getElementById('modalDate').textContent = dateTime.toLocaleDateString();
+    document.getElementById('modalTime').textContent = dateTime.toLocaleTimeString();
+    document.getElementById('modalNote').textContent = location.note || 'No note provided';
+    locationModal.show();
+}
+
+function fitAllMarkers() {
+    if (allLocations.length > 0) {
+        const bounds = L.latLngBounds(allLocations.map(loc => [loc.latitude, loc.longitude]));
+        map.fitBounds(bounds, { padding: [50, 50] });
     }
 }
 
-// Load markers from server
-function loadMarkers() {
-    fetch('/get_survey_locations')
-        .then(response => response.json())
-        .then(locations => {
-            console.log('Loading markers for locations:', locations);
-            
-            // Clear existing markers
-            markers.forEach(marker => marker.setMap(null));
-            markers = [];
-            bounds = new google.maps.LatLngBounds();
-
-            // Add new markers
-            locations.forEach(location => {
-                const marker = new google.maps.Marker({
-                    position: { lat: location.lat, lng: location.lng },
-                    map: map,
-                    title: location.name,
-                    animation: google.maps.Animation.DROP
-                });
-
-                bounds.extend(marker.getPosition());
-
-                // Add click listener
-                marker.addListener('click', () => {
-                    const infoWindow = new google.maps.InfoWindow({
-                        content: `
-                            <div style="padding: 10px;">
-                                <h6 style="margin-bottom: 8px;">${location.name}</h6>
-                                <p style="margin-bottom: 5px;"><small>${location.time}</small></p>
-                                ${location.note ? `<p style="margin: 0;"><small>${location.note}</small></p>` : ''}
-                            </div>
-                        `
-                    });
-                    infoWindow.open(map, marker);
-                });
-
-                markers.push(marker);
-            });
-
-            // Fit map to markers
-            if (markers.length > 0) {
-                map.fitBounds(bounds);
+function getCurrentLocation() {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                map.setView([lat, lng], 15);
+            },
+            function(error) {
+                console.error('Error getting location:', error);
+                alert('Unable to get your current location. Please check your location settings.');
             }
-        })
-        .catch(error => {
-            console.error('Error loading locations:', error);
-            showError('Failed to load survey locations');
-        });
+        );
+    } else {
+        alert('Geolocation is not supported by your browser.');
+    }
 }
 
-// Show error message
-function showError(message) {
-    document.getElementById('loading-overlay').style.display = 'none';
-    document.getElementById('error-message').textContent = message;
-    document.getElementById('map-error').style.display = 'block';
+function toggleHeatmap(show) {
+    if (show) {
+        map.addLayer(heatLayer);
+    } else {
+        map.removeLayer(heatLayer);
+    }
 }
 
-// Handle authentication failure
-function gm_authFailure() {
-    showError('Google Maps authentication failed. Please check API key configuration.');
-}
-
-// Load the Google Maps JavaScript API
-window.initMap = initMap;
-window.gm_authFailure = gm_authFailure;
-</script>
-<script async defer
-    src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap">
+// Refresh map when tab becomes visible
+document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') {
+        loadLocations();
+        map.invalidateSize();
+    }
+});
 </script>
 {% endblock %}

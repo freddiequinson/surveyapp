@@ -3,10 +3,6 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import os
 import logging
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -17,13 +13,6 @@ logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
-
-# Configure Google Maps API key
-GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
-if not GOOGLE_MAPS_API_KEY:
-    logger.warning("Google Maps API key not found!")
-else:
-    logger.info(f"Google Maps API key loaded (length: {len(GOOGLE_MAPS_API_KEY)})")
 
 # Configure database
 if os.environ.get('DATABASE_URL'):
@@ -67,6 +56,10 @@ def leaderboard():
 @app.route('/history')
 def history():
     return render_template('history.html')
+
+@app.route('/surveyed_areas')
+def surveyed_areas():
+    return render_template('surveyed_areas.html')
 
 @app.route('/submit_survey', methods=['POST'])
 def submit_survey():
@@ -210,35 +203,6 @@ def reset_data():
     except Exception as e:
         logger.error(f"Error in reset_data: {str(e)}")
         db.session.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/surveyed_areas')
-def surveyed_areas():
-    logger.info(f"API Key length: {len(GOOGLE_MAPS_API_KEY)}")
-    logger.info(f"API Key first 10 chars: {GOOGLE_MAPS_API_KEY[:10]}")
-    logger.info(f"Rendering surveyed_areas with API key status: {'[SET]'}")
-    return render_template('surveyed_areas.html', google_maps_api_key=GOOGLE_MAPS_API_KEY)
-
-@app.route('/get_survey_locations')
-def get_survey_locations():
-    try:
-        # Get all submissions with valid coordinates
-        submissions = Submission.query.filter(
-            Submission.latitude.isnot(None),
-            Submission.longitude.isnot(None)
-        ).order_by(Submission.submission_time.desc()).all()
-        
-        locations = [{
-            'name': sub.surveyor_name,
-            'lat': sub.latitude,
-            'lng': sub.longitude,
-            'time': sub.submission_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'note': sub.note
-        } for sub in submissions]
-        
-        return jsonify(locations)
-    except Exception as e:
-        logger.error(f"Error in get_survey_locations: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
