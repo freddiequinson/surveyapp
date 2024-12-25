@@ -63,7 +63,22 @@
                 <form id="surveyForm" class="mt-4">
                     <div class="mb-3">
                         <label for="name" class="form-label">Your Name</label>
-                        <input type="text" class="form-control" id="name" required>
+                        <div class="input-group">
+                            <input type="text" 
+                                   class="form-control" 
+                                   id="name" 
+                                   name="name" 
+                                   required 
+                                   list="surveyorNames"
+                                   autocomplete="off"
+                                   placeholder="Type or select your name">
+                            <datalist id="surveyorNames">
+                                <option value="Satia">
+                                <option value="Akotua & Sylvester">
+                                <option value="Prince & Sylvester">
+                                <option value="Andy & Selasie">
+                            </datalist>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label for="note" class="form-label">Note (Optional)</label>
