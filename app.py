@@ -18,12 +18,17 @@ logger = logging.getLogger(__name__)
 # Initialize Flask app
 app = Flask(__name__)
 
-# Configure database
-if os.environ.get('DATABASE_URL'):
-    # Use PostgreSQL for production
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL').replace('postgres://', 'postgresql://')
+# Database configuration
+if os.environ.get('RENDER'):
+    # Production database URL from Render
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', '').replace('postgres://', 'postgresql://')
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_size': 10,
+        'pool_recycle': 60,
+        'pool_pre_ping': True
+    }
 else:
-    # Use SQLite for development
+    # Local SQLite database
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///surveys.db'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
