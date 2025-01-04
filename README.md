@@ -43,6 +43,6 @@ python app.py
 This app is configured for deployment on platforms like Render, Heroku, or Python Anywhere.
 
 ## License
-
+MIT
 
 
