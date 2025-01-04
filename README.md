@@ -12,7 +12,7 @@ A web application to track survey progress with real-time updates, location trac
 - Dynamic leaderboard with progress bars
 - Mobile-responsive design
 
-## Tech Stack
+##Tech Stack
 
 - Backend: Flask
 - Database: SQLite
